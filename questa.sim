@@ -1,0 +1,31 @@
+
+vlib msim
+vlib msim/xil_defaultlib
+
+#Compile all modules#
+set RTL_SRC [lindex $argv 3]
+
+vlog -64 -sv -lint -work xil_defaultlib pcap_parser.sv
+
+vopt -64 +acc=npr -L xil_defaultlib -work xil_defaultlib xil_defaultlib.pcap_parser  -o tb_sim_opt
+# vopt -64 +acc=npr -L xil_defaultlib -work xil_defaultlib xil_defaultlib.tb_sim xil_defaultlib.glbl -o tb_sim_opt
+
+#Load the design. Use required libraries.#
+#vsim -onfinish final +notimingchecks -lib xil_defaultlib  -msglimitcount 10 -msglimit warning tb_sim_opt
+vsim -onfinish final +notimingchecks xil_defaultlib.tb_sim_opt
+
+onerror {resume}
+
+set NumericStdNoWarnings 1
+set StdArithNoWarnings 1
+set runTime "10us"
+#radix hex
+
+#View sim_tb_top signals in waveform#
+#add wave sim:/tb_sim/*
+
+run ${runTime}
+puts "${runTime} finished"
+stop
+
+exit
