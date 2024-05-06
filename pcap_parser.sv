@@ -21,6 +21,23 @@ typedef struct {
   bit [31:0] len;
 } pcap_local_hdr;
 
+
+bit [7:0] file_hdr [23:0] = {
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00
+};
+
+bit [7:0] pcap_hdr [15:0] = {
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00,
+  8'h00,8'h00,8'h00,8'h00
+};
+
 localparam MAGIC_LIBPCAP = 32'hd4c3b2a1;
 localparam DLT_EN10MB    = 32'h01000000;
 
@@ -50,29 +67,29 @@ task convert_to_axis(
     tkeep = new[tkeep.size() + 1](tkeep);
     tlast = new[tlast.size() + 1](tlast);
     mod = size % 64; 
-	if ( mod + j*64 == size) begin
-	  if (mod != 0)
-	    d = mod;
+    if ( mod + j*64 == size) begin
+      if (mod != 0)
+        d = mod;
       else 
-	    d = 64;
-	  tlast[flit_cnt] = 1;
-	end
-	else begin
-	  d = 64;
-	  tlast[flit_cnt] = 0;
-	end
+        d = 64;
+      tlast[flit_cnt] = 1;
+    end
+    else begin
+      d = 64;
+      tlast[flit_cnt] = 0;
+    end
     tkeep_tmp = {64'h0, {64{1'b1}}};
     for (int i = 0; i < d; i+=1) begin
       tdata_pack[8*i +: 8] = packet[p];
       tkeep_tmp = tkeep_tmp << 1;
-	  p += 1;
+      p += 1;
     end
-	tdata[flit_cnt] = tdata_pack;
-	tkeep[flit_cnt] = tkeep_tmp[127:64];
-	$display("TDATA:0x%x", tdata[flit_cnt]);
-	$display("TKEEP:0x%x", tkeep[flit_cnt]);
-	$display("TLAST:0x%x", tlast[flit_cnt]);
-	flit_cnt++;
+    tdata[flit_cnt] = tdata_pack;
+    tkeep[flit_cnt] = tkeep_tmp[127:64];
+    //$display("TDATA:0x%x", tdata[flit_cnt]);
+    //$display("TKEEP:0x%x", tkeep[flit_cnt]);
+    //$display("TLAST:0x%x", tlast[flit_cnt]);
+    flit_cnt++;
   end
 
 endtask
@@ -90,12 +107,13 @@ task read_pcap(
   bit [31:0] caplen_tmp;
   bit [31:0] len_tmp;
 
-  //bit [511:0] tdata [];
-  //bit [63:0]  tkeep [];
-  //bit         tlast [];
+  bit [511:0] tdata_f [];
+  bit [63:0]  tkeep_f [];
+  bit         tlast_f [];
 
   automatic int read_bytes = 0;
   automatic int pkt_count = 0;
+  automatic int f_count = 0;
   automatic integer fd = $fopen(file,"r");
   pcap_glob_hdr glob_hdr;
   pcap_local_hdr local_hdr;
@@ -116,32 +134,48 @@ task read_pcap(
   end
   while(!$feof(fd)) begin
     $fread(local_hdr, fd);
-	if($feof(fd) == 1) begin
-	  return;
-	end
-	pkt_count += 1;
+    if($feof(fd) == 1) begin
+      return;
+    end
+    pkt_count += 1;
     caplen_tmp = {<<8{local_hdr.caplen}};
     len_tmp = {<<8{local_hdr.len}};
-	//$display("%p", local_hdr);
-	$display("Pkt[%d] captured len: %d Byte, len: %d Byte", pkt_count, caplen_tmp, len_tmp);
+    if (debug)
+      $display("Pkt[%d] captured len: %d Byte, len: %d Byte", pkt_count, caplen_tmp, len_tmp);
     while (read_bytes < caplen_tmp) begin
       $fread(data, fd);
-	  packet[read_bytes] = data;
+      packet[read_bytes] = data;
       read_bytes = read_bytes + 1;
     end
-	//$display("%p", packet);
-	read_bytes = 0;
-	convert_to_axis(packet, caplen_tmp, tdata, tkeep, tlast);
+    read_bytes = 0;
+    convert_to_axis(packet, caplen_tmp, tdata_f, tkeep_f, tlast_f);
+    
+    tdata = new[tdata.size() + tdata_f.size()](tdata);
+    tkeep = new[tkeep.size() + tkeep_f.size()](tkeep);
+    tlast = new[tlast.size() + tlast_f.size()](tlast);
+
+    for  (int i = 0; i < tdata_f.size(); i++) begin
+      tdata[f_count] = tdata_f[i];
+      tkeep[f_count] = tkeep_f[i];
+      tlast[f_count] = tlast_f[i];
+      f_count++;
+    end
+
+    if (debug) begin
+      for (int i = 0; i < 100000; i++)
+        if (tkeep[i] > 0)
+          $display("RD [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
+    end
   end
 
 endtask
 
-task write_pcap(
+task automatic write_pcap(
   string file,
   bit debug,
-  bit [511:0] tdata [],
-  bit [63:0]  tkeep [],
-  bit         tlast []
+  ref bit [511:0] tdata [],
+  ref bit [63:0]  tkeep [],
+  ref bit         tlast []
 );
 
   bit [7:0] data;
@@ -150,45 +184,80 @@ task write_pcap(
   bit [63:0] tkeep_tmp;
   pcap_glob_hdr glob_hdr;
   pcap_local_hdr local_hdr;
-  automatic integer fd = $fopen(file,"w");
+  automatic integer fd = $fopen(file,"wb");
   automatic integer flit_cnt = 0;
   automatic integer pkt_pos = 0;
 
-  glob_hdr.magic = MAGIC_LIBPCAP;
+  // Writing Global Header
+  glob_hdr.magic         = MAGIC_LIBPCAP;
   glob_hdr.version_major = 16'h0200;
   glob_hdr.version_minor = 16'h0400;
-  glob_hdr.thiszone = 16'h0;
-  glob_hdr.sigfigs = 16'h0;
-  glob_hdr.snaplen = 32'h00000400;
-  glob_hdr.linktype = DLT_EN10MB;
+  glob_hdr.thiszone      = 32'h0;
+  glob_hdr.sigfigs       = 32'h0;
+  glob_hdr.snaplen       = 32'h00000400;
+  glob_hdr.linktype      = DLT_EN10MB;
 
-  $fwrite(fd, glob_hdr);
+  for (int i = 0; i < 4; i++)
+    file_hdr[20+i] = glob_hdr.magic[8*i +: 8];
+  for (int i = 0; i < 2; i++)
+    file_hdr[i+18] = glob_hdr.version_major[8*i +: 8];
+  for (int i = 0; i < 2; i++)
+    file_hdr[i+16] = glob_hdr.version_minor[8*i +: 8];
+  for (int i = 0; i < 4; i++)
+    file_hdr[i+12] = glob_hdr.thiszone[8*i +: 8];
+  for (int i = 0; i < 4; i++)
+    file_hdr[i+8] = glob_hdr.sigfigs[8*i +: 8];
+  for (int i = 0; i < 4; i++)
+    file_hdr[i+4] = glob_hdr.snaplen[8*i +: 8];
+  for (int i = 0; i < 4; i++)
+    file_hdr[i] = glob_hdr.linktype[8*i +: 8];
+  foreach(file_hdr[i]) $fwrite(fd,"%c",file_hdr[i]);
 
+  if (debug)
+    $display("tlast.size: %d, tkeep.size: %d, tdata.size: %d", tlast.size, tkeep.size, tdata.size);
   while(tlast.size != flit_cnt) begin
-    while (tlast[flit_cnt]) begin
-      tdata_tmp = tdata[flit_cnt];
-      tkeep_tmp = tkeep[flit_cnt];
-      for (int i = 0; i < 64; i++)  begin
-        if (tkeep_tmp[i]) begin
-          packet[pkt_pos++] = tdata_tmp[i*8 +: 8];
-        end
+    if (debug)
+      $display("TDATA:0x%x TKEEP:0x%x TLAST:0x%x", tdata[flit_cnt], tkeep[flit_cnt], tlast[flit_cnt]);
+    tdata_tmp = tdata[flit_cnt];
+    tkeep_tmp = tkeep[flit_cnt];
+    for (int i = 0; i < 64; i++)  begin
+      if (tkeep_tmp[i]) begin
+        packet[pkt_pos++] = tdata_tmp[i*8 +: 8];
       end
-      flit_cnt++;
     end
 
-    local_hdr.tv_sec  = 32'h0;
-    local_hdr.tv_usec = 32'h0;
-    local_hdr.caplen  = pkt_pos;
-    local_hdr.len     = pkt_pos;
-    
-    $fwrite(fd, local_hdr);
-	for (int i = 0; i < pkt_pos; i++) begin
-	  data = packet[i];
-      $fwrite(fd, data);
+    if (tlast[flit_cnt]) begin
+      // Writing libpcap local header
+      local_hdr.tv_sec  = 32'hfa;
+      local_hdr.tv_usec = 32'h12345678;
+      local_hdr.caplen  = {<<8{pkt_pos}};
+      local_hdr.len     = {<<8{pkt_pos}};
+
+      for (int i = 0; i < 4; i++)
+        pcap_hdr[i+12] = local_hdr.tv_sec[8*i +: 8];
+      for (int i = 0; i < 4; i++)
+        pcap_hdr[i+8] = local_hdr.tv_usec[8*i +: 8];
+      for (int i = 0; i < 4; i++)
+        pcap_hdr[i+4] = local_hdr.caplen[8*i +: 8];
+      for (int i = 0; i < 4; i++)
+        pcap_hdr[i] = local_hdr.len[8*i +: 8];
+      foreach(pcap_hdr[i]) $fwrite(fd,"%c",pcap_hdr[i]);
+
+      // Writing a packet data
+      for (int i = 0; i < pkt_pos; i++) begin
+        data = packet[i];
+        $fwrite(fd, "%c", data);
+      end
+
+      // Clear packet buffer and pkt_pos
+      pkt_pos = 0;
+      for (int i = 0; i < 8192; i++)
+        packet[i] = 8'h0;
 	end
+    flit_cnt++;
   end
 
-  $flocse(fd);
+  $fclose(fd);
 
 endtask
 
@@ -205,6 +274,9 @@ initial begin
 
   write_pcap("output.pcap", DEBUG_ENABLE, tdata, tkeep, tlast);
 
+  for (int i = 0; i < 100000; i++)
+    if (tkeep[i] > 0)
+      $display("[%d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
   $finish;
 end 
 
