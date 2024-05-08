@@ -44,17 +44,23 @@ localparam DLT_EN10MB    = 32'h01000000;
 localparam DEBUG_ENABLE  = 1'b1;
 localparam DEBUG_DISABLE = 1'b0;
 
+
+parameter TDATA_WIDTH  = 512; 
+parameter PKT_MTU_BYTE = 8192; 
+
 bit [31:0] snaplen_tmp;
 
-task convert_to_axis(
-  bit [7:0]packet[0:8191], 
-  int size,
-  output bit [511:0] tdata [],
-  output bit [63:0]  tkeep [],
-  output bit         tlast []
+task automatic convert_to_axis(
+  ref bit                  [7:0] packet [0:PKT_MTU_BYTE-1],
+  bit                            debug,
+  bit [31:0]                     size,
+  output bit   [TDATA_WIDTH-1:0] tdata [],
+  output bit [TDATA_WIDTH/8-1:0] tkeep [],
+  output bit                     tlast []
 );
-  bit [511:0] tdata_pack;
-  bit [63+64:0] tkeep_tmp;
+
+  bit [TDATA_WIDTH-1:0] tdata_pack;
+  bit [TDATA_WIDTH/8+TDATA_WIDTH/8-1:0] tkeep_tmp;
 
   automatic int flit_cnt = 0;
   automatic int j = 0;
@@ -66,50 +72,50 @@ task convert_to_axis(
     tdata = new[tdata.size() + 1](tdata);
     tkeep = new[tkeep.size() + 1](tkeep);
     tlast = new[tlast.size() + 1](tlast);
-    mod = size % 64; 
-    if ( mod + j*64 == size) begin
+    mod = size % (TDATA_WIDTH/8); 
+    if ( mod + j*(TDATA_WIDTH/8) == size) begin
       if (mod != 0)
         d = mod;
       else 
-        d = 64;
+        d = TDATA_WIDTH/8;
       tlast[flit_cnt] = 1;
     end
     else begin
-      d = 64;
+      d = TDATA_WIDTH/8;
       tlast[flit_cnt] = 0;
     end
-    tkeep_tmp = {64'h0, {64{1'b1}}};
+    tkeep_tmp = {{(TDATA_WIDTH/8){1'b0}}, {(TDATA_WIDTH/8){1'b1}}};
+	tdata_pack = 'h0;
     for (int i = 0; i < d; i+=1) begin
       tdata_pack[8*i +: 8] = packet[p];
       tkeep_tmp = tkeep_tmp << 1;
       p += 1;
     end
     tdata[flit_cnt] = tdata_pack;
-    tkeep[flit_cnt] = tkeep_tmp[127:64];
-    //$display("TDATA:0x%x", tdata[flit_cnt]);
-    //$display("TKEEP:0x%x", tkeep[flit_cnt]);
-    //$display("TLAST:0x%x", tlast[flit_cnt]);
+    tkeep[flit_cnt] = tkeep_tmp[(TDATA_WIDTH/8)*2-1:(TDATA_WIDTH/8)];
+    if (debug)
+      $display("[CV] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", flit_cnt, tdata[flit_cnt], tkeep[flit_cnt], tlast[flit_cnt]);
     flit_cnt++;
   end
 
 endtask
 
 task read_pcap(
-  string file,
-  bit debug,
-  output bit [511:0] tdata [],
-  output bit [63:0]  tkeep [],
-  output bit         tlast []
+  string                         file,
+  bit                            debug,
+  output bit [TDATA_WIDTH-1:0]   tdata [],
+  output bit [TDATA_WIDTH/8-1:0] tkeep [],
+  output bit                     tlast []
 );
 
-  bit [7:0] packet [0:8191];
+  bit [7:0] packet [0:PKT_MTU_BYTE-1];
   bit [7:0] data;
   bit [31:0] caplen_tmp;
   bit [31:0] len_tmp;
 
-  bit [511:0] tdata_f [];
-  bit [63:0]  tkeep_f [];
-  bit         tlast_f [];
+  bit [TDATA_WIDTH-1:0]   tdata_f [];
+  bit [TDATA_WIDTH/8-1:0] tkeep_f [];
+  bit                     tlast_f [];
 
   automatic int read_bytes = 0;
   automatic int pkt_count = 0;
@@ -148,7 +154,7 @@ task read_pcap(
       read_bytes = read_bytes + 1;
     end
     read_bytes = 0;
-    convert_to_axis(packet, caplen_tmp, tdata_f, tkeep_f, tlast_f);
+    convert_to_axis(packet, debug, caplen_tmp, tdata_f, tkeep_f, tlast_f);
     
     tdata = new[tdata.size() + tdata_f.size()](tdata);
     tkeep = new[tkeep.size() + tkeep_f.size()](tkeep);
@@ -160,28 +166,22 @@ task read_pcap(
       tlast[f_count] = tlast_f[i];
       f_count++;
     end
-
-    if (debug) begin
-      for (int i = 0; i < 100000; i++)
-        if (tkeep[i] > 0)
-          $display("RD [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
-    end
   end
 
 endtask
 
 task automatic write_pcap(
-  string file,
-  bit debug,
-  ref bit [511:0] tdata [],
-  ref bit [63:0]  tkeep [],
-  ref bit         tlast []
+  string                      file,
+  bit                         debug,
+  ref bit [TDATA_WIDTH-1:0]   tdata [],
+  ref bit [TDATA_WIDTH/8-1:0] tkeep [],
+  ref bit                     tlast []
 );
 
   bit [7:0] data;
-  bit [7:0] packet [0:8191];
-  bit [511:0] tdata_tmp;
-  bit [63:0] tkeep_tmp;
+  bit [7:0] packet [0:PKT_MTU_BYTE-1];
+  bit [TDATA_WIDTH-1:0] tdata_tmp;
+  bit [TDATA_WIDTH/8-1:0] tkeep_tmp;
   pcap_glob_hdr glob_hdr;
   pcap_local_hdr local_hdr;
   automatic integer fd = $fopen(file,"wb");
@@ -214,13 +214,13 @@ task automatic write_pcap(
   foreach(file_hdr[i]) $fwrite(fd,"%c",file_hdr[i]);
 
   if (debug)
-    $display("tlast.size: %d, tkeep.size: %d, tdata.size: %d", tlast.size, tkeep.size, tdata.size);
+    $display("[WR] tlast.size: %d, tkeep.size: %d, tdata.size: %d", tlast.size, tkeep.size, tdata.size);
   while(tlast.size != flit_cnt) begin
     if (debug)
-      $display("TDATA:0x%x TKEEP:0x%x TLAST:0x%x", tdata[flit_cnt], tkeep[flit_cnt], tlast[flit_cnt]);
+      $display("[WR] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", flit_cnt, tdata[flit_cnt], tkeep[flit_cnt], tlast[flit_cnt]);
     tdata_tmp = tdata[flit_cnt];
     tkeep_tmp = tkeep[flit_cnt];
-    for (int i = 0; i < 64; i++)  begin
+    for (int i = 0; i < TDATA_WIDTH/8; i++)  begin
       if (tkeep_tmp[i]) begin
         packet[pkt_pos++] = tdata_tmp[i*8 +: 8];
       end
@@ -251,7 +251,7 @@ task automatic write_pcap(
 
       // Clear packet buffer and pkt_pos
       pkt_pos = 0;
-      for (int i = 0; i < 8192; i++)
+      for (int i = 0; i < PKT_MTU_BYTE; i++)
         packet[i] = 8'h0;
 	end
     flit_cnt++;
@@ -261,9 +261,9 @@ task automatic write_pcap(
 
 endtask
 
-bit [511:0] tdata [];
-bit [63:0]  tkeep [];
-bit         tlast [];
+bit [TDATA_WIDTH-1:0]   tdata [];
+bit [TDATA_WIDTH/8-1:0] tkeep [];
+bit                     tlast [];
 
 //bit [511:0] tdata_out [];
 //bit [63:0]  tkeep_out [];
