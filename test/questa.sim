@@ -1,0 +1,42 @@
+
+set XPM_PATH /tools/Xilinx/Vivado/2023.1/data/ip/xpm
+set XVIP_PATH /tools/Xilinx/Vivado/2023.1/data/xilinx_vip
+
+vlib msim
+vlib msim/questa_lib
+vlib msim/xil_defaultlib
+vlib msim/questa_lib/xpm
+vmap xil_defaultlib msim/xil_defaultlib
+vmap xpm msim/questa_lib/xpm
+
+vlog -work xpm -64 -incr -mfcu -sv "+incdir+$XVIP_PATH/include" \
+"$XPM_PATH/xpm_cdc/hdl/xpm_cdc.sv" \
+"$XPM_PATH/xpm_fifo/hdl/xpm_fifo.sv" \
+"$XPM_PATH/xpm_memory/hdl/xpm_memory.sv"
+
+vlog -64 -lint -work xil_defaultlib /tools/Xilinx/Vivado/2023.1/data/verilog/src/glbl.v
+vlog -64 -sv -lint -work xil_defaultlib ../pcap_parser.sv
+vlog -64 -sv -lint -work xil_defaultlib tb.sv
+
+vopt -64 +acc=npr -L xil_defaultlib -L xpm -work xil_defaultlib xil_defaultlib.tb  -o tb_sim_opt
+# vopt -64 +acc=npr -L xil_defaultlib -work xil_defaultlib xil_defaultlib.tb_sim xil_defaultlib.glbl -o tb_sim_opt
+
+#Load the design. Use required libraries.#
+#vsim -onfinish final +notimingchecks -lib xil_defaultlib  -msglimitcount 10 -msglimit warning tb_sim_opt
+vsim -onfinish final +notimingchecks xil_defaultlib.tb_sim_opt
+
+onerror {resume}
+
+set NumericStdNoWarnings 1
+set StdArithNoWarnings 1
+set runTime "10us"
+#radix hex
+
+#View sim_tb_top signals in waveform#
+#add wave sim:/tb_sim/*
+
+run ${runTime}
+puts "${runTime} finished"
+stop
+
+exit

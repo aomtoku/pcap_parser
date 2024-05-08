@@ -303,8 +303,10 @@ module pkt_replay #(
   
   bit [31:0] iter;
 
+  pcap_parser inst_pcap_parser();
+
   initial begin
-    read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
+    inst_pcap_parser.read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
   end
     
   always_comb begin
@@ -351,9 +353,11 @@ module pkt_writer #(
   bit [TDATA_WIDTH/8-1:0] tkeep [];
   bit                     tlast [];
 
-  bit [31:0] counter;
+  bit [31:0] counter, wait_counter;
 
   assign s_axis_tready = 1'b1;
+
+  pcap_parser inst_pcap_parser();
 
   always_comb begin
     if (s_axis_tvalid && s_axis_tready) begin
@@ -366,10 +370,18 @@ module pkt_writer #(
   always_ff @(posedge clk)
     if (rst) begin
 	  counter <= 'h0;
+	  wait_counter <= 'h0;
     end
     else begin
       if (s_axis_tvalid && s_axis_tready)
         counter <= counter + 'h1;
+      if (!s_axis_tvalid)
+        wait_counter <= wait_counter + 'h1;
     end
+
+  initial begin
+    wait(wait_counter > 300);
+    inst_pcap_parser.write_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
+  end
 
 endmodule
