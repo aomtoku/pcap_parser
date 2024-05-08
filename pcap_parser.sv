@@ -270,14 +270,106 @@ bit                     tlast [];
 //bit         tlast_out [];
 
 initial begin
-  read_pcap("f.pcap", DEBUG_ENABLE, tdata, tkeep, tlast);
+  read_pcap("f.pcap", DEBUG_DISABLE, tdata, tkeep, tlast);
 
-  write_pcap("output.pcap", DEBUG_ENABLE, tdata, tkeep, tlast);
+  write_pcap("output.pcap", DEBUG_DISABLE, tdata, tkeep, tlast);
 
   for (int i = 0; i < 100000; i++)
     if (tkeep[i] > 0)
       $display("[%d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
   $finish;
 end 
+
+endmodule
+
+module pkt_replay #(
+	parameter PCAP_FILE_NAME = "",
+	parameter TDATA_WIDTH    = 512,
+	parameter PKT_MTU_SIZE   = 8192
+)(
+  input  logic                     clk,
+  input  logic                     rst,
+
+  output logic   [TDATA_WIDTH-1:0] m_axis_tdata,
+  output logic [TDATA_WIDTH/8-1:0] m_axis_tkeep,
+  output logic                     m_axis_tlast,
+  output logic                     m_axis_tvalid,
+  input  logic                     m_axis_tready
+);
+
+  bit   [TDATA_WIDTH-1:0] tdata [];
+  bit [TDATA_WIDTH/8-1:0] tkeep [];
+  bit                     tlast [];
+  
+  bit [31:0] iter;
+
+  initial begin
+    read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
+  end
+    
+  always_comb begin
+	  m_axis_tvalid = 1'b0;
+	  m_axis_tdata = 'h0;
+	  m_axis_tkeep = 'h0;
+	  m_axis_tlast = 'h0;
+
+    if (m_axis_tready) begin
+	  m_axis_tvalid = 1'b1;
+	  m_axis_tdata = tdata[iter];
+	  m_axis_tkeep = tkeep[iter];
+	  m_axis_tlast = tlast[iter];
+	end
+  end
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+	  iter <= 'h0;
+	end
+	else begin
+      iter <= iter + 'h1;
+	end
+  end
+
+endmodule
+
+module pkt_writer #(
+	parameter PCAP_FILE_NAME = "",
+	parameter TDATA_WIDTH    = 512,
+	parameter PKT_MTU_SIZE   = 8192
+)(
+  input  logic                     clk,
+  input  logic                     rst,
+
+  input  logic   [TDATA_WIDTH-1:0] s_axis_tdata,
+  input  logic [TDATA_WIDTH/8-1:0] s_axis_tkeep,
+  input  logic                     s_axis_tlast,
+  input  logic                     s_axis_tvalid,
+  output logic                     s_axis_tready
+);
+
+  bit   [TDATA_WIDTH-1:0] tdata [];
+  bit [TDATA_WIDTH/8-1:0] tkeep [];
+  bit                     tlast [];
+
+  bit [31:0] counter;
+
+  assign s_axis_tready = 1'b1;
+
+  always_comb begin
+    if (s_axis_tvalid && s_axis_tready) begin
+      tdata[counter] = s_axis_tdata;
+      tkeep[counter] = s_axis_tkeep;
+      tlast[counter] = s_axis_tlast;
+    end
+  end
+
+  always_ff @(posedge clk)
+    if (rst) begin
+	  counter <= 'h0;
+    end
+    else begin
+      if (s_axis_tvalid && s_axis_tready)
+        counter <= counter + 'h1;
+    end
 
 endmodule
