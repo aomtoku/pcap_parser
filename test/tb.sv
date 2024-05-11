@@ -86,7 +86,8 @@ module tb();
   );
 
   pkt_writer #(
-  	.PCAP_FILE_NAME ("output.pcap")
+  	.PCAP_FILE_NAME ("output.pcap"),
+	.TIMEOUT        (400)
   ) inst_pkt_writer (
     .clk            (core_clk),
     .rst            (core_rst),
@@ -99,12 +100,12 @@ module tb();
   );
 
   always_comb begin
-    if (s_axis_tvalid && s_axis_tready) begin
-      $display("[S] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", s_axis_tdata, s_axis_tkeep, s_axis_tlast);
-	end
-    if (m_axis_tvalid && m_axis_tready) begin
-      $display("[M] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", m_axis_tdata, m_axis_tkeep, m_axis_tlast);
-	end
+    //if (s_axis_tvalid && s_axis_tready) begin
+    //  $display("[S] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", s_axis_tdata, s_axis_tkeep, s_axis_tlast);
+	//end
+    //if (m_axis_tvalid && m_axis_tready) begin
+    //  $display("[M] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", m_axis_tdata, m_axis_tkeep, m_axis_tlast);
+	//end
   end
 
   initial begin

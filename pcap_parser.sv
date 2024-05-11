@@ -428,19 +428,17 @@ module pkt_writer #(
         wait_counter <= 'h0;
     end
 
-  always_ff @(posedge clk)
-    if (s_axis_tvalid && s_axis_tready)
-      $display("[S_AXIS] TDATA:0x%x TKEEP:0x%x TLAST:0x%x",  s_axis_tdata, s_axis_tkeep, s_axis_tlast);
+  //always_ff @(posedge clk)
+  //  if (s_axis_tvalid && s_axis_tready)
+  //    $display("[S_AXIS] TDATA:0x%x TKEEP:0x%x TLAST:0x%x",  s_axis_tdata, s_axis_tkeep, s_axis_tlast);
 
   initial begin
-    $display("AOM 1");
     wait(wait_counter > TIMEOUT);
-    $display("AOM 2");
-    for (int i = 0; i < tdata.size(); i++)
-      $display("[WR PCAP] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
+    //if (debug)
+    //  for (int i = 0; i < tdata.size(); i++)
+    //    $display("[WR PCAP] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
     inst_pcap_parser.write_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
     $display("wrote axi-stream flits %d", tdata.size());
-    $display("AOM 3");
 	$display("SUMMARY: writting to %s", PCAP_FILE_NAME);
 	$finish;
   end
