@@ -309,7 +309,8 @@ module pkt_replay #(
   bit [TDATA_WIDTH/8-1:0] tkeep [];
   bit                     tlast [];
   
-  bit [31:0] iter;
+  bit [31:0] iter, iter_next;
+  bit [31:0] cnt, cnt_next;
   localparam IDLE  = 2'b00;
   localparam START = 2'b01;
   localparam FIN   = 2'b10;
@@ -325,15 +326,23 @@ module pkt_replay #(
     
   always_comb begin
     state_next = state;
+	iter_next = iter;
+	cnt_next = cnt;
 	m_axis_tvalid = 1'b0;
 	m_axis_tdata = 'h0;
 	m_axis_tkeep = 'h0;
 	m_axis_tlast = 'h0;
 
     case (state)
-    IDLE: state_next = START;
+    IDLE: begin
+	  cnt_next = cnt + 1;
+      if (cnt == 30) begin
+        state_next = START;
+      end
+	end
     START: begin
       if (m_axis_tready) begin
+	    iter_next = iter + 1;
         m_axis_tvalid = 1'b1;
         m_axis_tdata = tdata[iter];
         m_axis_tkeep = tkeep[iter];
@@ -354,12 +363,14 @@ module pkt_replay #(
 
   always_ff @(posedge clk) begin
     if (rst) begin
-	  iter <= 'h0;
-	  state <= IDLE;
+      iter <= 'h0;
+      cnt <= 'h0;
+      state <= IDLE;
 	end
 	else begin
-      iter <= iter + 'h1;
-	  state <= state_next;
+      iter <= iter_next;
+      cnt <= cnt_next;
+      state <= state_next;
 	end
   end
 
@@ -393,6 +404,10 @@ module pkt_writer #(
 
   always_comb begin
     if (s_axis_tvalid && s_axis_tready) begin
+      tdata = new[tdata.size() + 1](tdata);
+      tkeep = new[tkeep.size() + 1](tkeep);
+      tlast = new[tlast.size() + 1](tlast);
+
       tdata[counter] = s_axis_tdata;
       tkeep[counter] = s_axis_tkeep;
       tlast[counter] = s_axis_tlast;
@@ -413,11 +428,18 @@ module pkt_writer #(
         wait_counter <= 'h0;
     end
 
+  always_ff @(posedge clk)
+    if (s_axis_tvalid && s_axis_tready)
+      $display("[S_AXIS] TDATA:0x%x TKEEP:0x%x TLAST:0x%x",  s_axis_tdata, s_axis_tkeep, s_axis_tlast);
+
   initial begin
     $display("AOM 1");
     wait(wait_counter > TIMEOUT);
     $display("AOM 2");
+    for (int i = 0; i < tdata.size(); i++)
+      $display("[WR PCAP] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
     inst_pcap_parser.write_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
+    $display("wrote axi-stream flits %d", tdata.size());
     $display("AOM 3");
 	$display("SUMMARY: writting to %s", PCAP_FILE_NAME);
 	$finish;
