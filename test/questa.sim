@@ -29,7 +29,7 @@ onerror {resume}
 
 set NumericStdNoWarnings 1
 set StdArithNoWarnings 1
-set runTime "10us"
+set runTime "101us"
 #radix hex
 
 #View sim_tb_top signals in waveform#
@@ -39,4 +39,4 @@ run ${runTime}
 puts "${runTime} finished"
 stop
 
-exit
+#exit

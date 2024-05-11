@@ -6,7 +6,7 @@ questa:
 
 .PHONY: gui-questa
 gui-questa:
-	vsim -64 -do "test/questa.sim" -gui
+	vsim -64 -do "questa.sim" -gui
 
 .PHONY: clean
 clean:

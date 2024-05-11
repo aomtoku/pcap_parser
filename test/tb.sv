@@ -37,6 +37,7 @@ module tb();
 
   assign fifo_wr_en = m_axis_tvalid && m_axis_tready;
   assign s_axis_tvalid = !fifo_empty;
+  assign m_axis_tready = ~fifo_nearly_full;
 
   pcap_parser inst_pcap_parser();
 
@@ -87,7 +88,7 @@ module tb();
   pkt_writer #(
   	.PCAP_FILE_NAME ("output.pcap")
   ) inst_pkt_writer (
-    .clk            (core_ckl),
+    .clk            (core_clk),
     .rst            (core_rst),
   
     .s_axis_tdata   (s_axis_tdata ),
@@ -96,5 +97,22 @@ module tb();
     .s_axis_tvalid  (s_axis_tvalid),
     .s_axis_tready  (s_axis_tready)
   );
+
+  always_comb begin
+    if (s_axis_tvalid && s_axis_tready) begin
+      $display("[S] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", s_axis_tdata, s_axis_tkeep, s_axis_tlast);
+	end
+    if (m_axis_tvalid && m_axis_tready) begin
+      $display("[M] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", m_axis_tdata, m_axis_tkeep, m_axis_tlast);
+	end
+  end
+
+  initial begin
+    $display(" -- simulation begins -- ");
+	#100us
+    $display(" -- simulation finished -- ");
+    $finish;
+  end
+
 
 endmodule

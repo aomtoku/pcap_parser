@@ -105,7 +105,8 @@ task read_pcap(
   bit                            debug,
   output bit [TDATA_WIDTH-1:0]   tdata [],
   output bit [TDATA_WIDTH/8-1:0] tkeep [],
-  output bit                     tlast []
+  output bit                     tlast [],
+  output int                     size
 );
 
   bit [7:0] packet [0:PKT_MTU_BYTE-1];
@@ -141,6 +142,8 @@ task read_pcap(
   while(!$feof(fd)) begin
     $fread(local_hdr, fd);
     if($feof(fd) == 1) begin
+      size = tdata.size();
+      $fclose(fd);
       return;
     end
     pkt_count += 1;
@@ -160,6 +163,7 @@ task read_pcap(
     tkeep = new[tkeep.size() + tkeep_f.size()](tkeep);
     tlast = new[tlast.size() + tlast_f.size()](tlast);
 
+    $display(" S DEBUG ==== tdata.size() = %u", tdata.size());
     for  (int i = 0; i < tdata_f.size(); i++) begin
       tdata[f_count] = tdata_f[i];
       tkeep[f_count] = tkeep_f[i];
@@ -257,7 +261,11 @@ task automatic write_pcap(
     flit_cnt++;
   end
 
+  $display("DEBUG: AOM FINI");
+
   $fclose(fd);
+
+  $display("DEBUG: AOM FINI 2");
 
 endtask
 
@@ -270,14 +278,14 @@ bit                     tlast [];
 //bit         tlast_out [];
 
 initial begin
-  read_pcap("f.pcap", DEBUG_DISABLE, tdata, tkeep, tlast);
+  //read_pcap("f.pcap", DEBUG_DISABLE, tdata, tkeep, tlast);
 
-  write_pcap("output.pcap", DEBUG_DISABLE, tdata, tkeep, tlast);
+  //write_pcap("output.pcap", DEBUG_DISABLE, tdata, tkeep, tlast);
 
-  for (int i = 0; i < 100000; i++)
-    if (tkeep[i] > 0)
-      $display("[%d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
-  $finish;
+  //for (int i = 0; i < 100000; i++)
+  //  if (tkeep[i] > 0)
+  //    $display("[%d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
+  //$finish;
 end 
 
 endmodule
@@ -302,42 +310,66 @@ module pkt_replay #(
   bit                     tlast [];
   
   bit [31:0] iter;
+  localparam IDLE  = 2'b00;
+  localparam START = 2'b01;
+  localparam FIN   = 2'b10;
+  int size;
+
+  logic [1:0] state_next, state;
 
   pcap_parser inst_pcap_parser();
 
   initial begin
-    inst_pcap_parser.read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
+    inst_pcap_parser.read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast, size);
   end
     
   always_comb begin
-	  m_axis_tvalid = 1'b0;
-	  m_axis_tdata = 'h0;
-	  m_axis_tkeep = 'h0;
-	  m_axis_tlast = 'h0;
+    state_next = state;
+	m_axis_tvalid = 1'b0;
+	m_axis_tdata = 'h0;
+	m_axis_tkeep = 'h0;
+	m_axis_tlast = 'h0;
 
-    if (m_axis_tready) begin
-	  m_axis_tvalid = 1'b1;
-	  m_axis_tdata = tdata[iter];
-	  m_axis_tkeep = tkeep[iter];
-	  m_axis_tlast = tlast[iter];
-	end
+    case (state)
+    IDLE: state_next = START;
+    START: begin
+      if (m_axis_tready) begin
+        m_axis_tvalid = 1'b1;
+        m_axis_tdata = tdata[iter];
+        m_axis_tkeep = tkeep[iter];
+        m_axis_tlast = tlast[iter];
+      end
+	  if (iter == size) begin
+	    state_next = FIN;
+	  end
+    end
+    FIN: begin
+      m_axis_tvalid = 1'b0;
+      m_axis_tdata = 'h0;
+      m_axis_tkeep = 'h0;
+      m_axis_tlast = 1'b0;
+    end
+    endcase
   end
 
   always_ff @(posedge clk) begin
     if (rst) begin
 	  iter <= 'h0;
+	  state <= IDLE;
 	end
 	else begin
       iter <= iter + 'h1;
+	  state <= state_next;
 	end
   end
 
 endmodule
 
 module pkt_writer #(
-	parameter PCAP_FILE_NAME = "",
-	parameter TDATA_WIDTH    = 512,
-	parameter PKT_MTU_SIZE   = 8192
+    parameter PCAP_FILE_NAME = "",
+    parameter TDATA_WIDTH    = 512,
+    parameter PKT_MTU_SIZE   = 8192,
+    parameter TIMEOUT        = 300
 )(
   input  logic                     clk,
   input  logic                     rst,
@@ -377,11 +409,18 @@ module pkt_writer #(
         counter <= counter + 'h1;
       if (!s_axis_tvalid)
         wait_counter <= wait_counter + 'h1;
+      else
+        wait_counter <= 'h0;
     end
 
   initial begin
-    wait(wait_counter > 300);
+    $display("AOM 1");
+    wait(wait_counter > TIMEOUT);
+    $display("AOM 2");
     inst_pcap_parser.write_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
+    $display("AOM 3");
+	$display("SUMMARY: writting to %s", PCAP_FILE_NAME);
+	$finish;
   end
 
 endmodule
