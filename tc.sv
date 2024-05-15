@@ -23,12 +23,13 @@ module tc #(
 );
 
   always_comb begin
-
   end
 
   always_ff @(posedge clk) begin
-    if ()
+    if (rst) begin
+    end
+    else begin
+    end
   end
-
 
 endmodule
