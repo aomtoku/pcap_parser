@@ -376,6 +376,113 @@ module pkt_replay #(
 
 endmodule
 
+
+module pkt_replay_avalon_st #(
+	parameter PCAP_FILE_NAME = "",
+	parameter DATA_WIDTH    = 512,
+	parameter PKT_MTU_SIZE   = 8192
+)(
+  input  logic                     clk,
+  input  logic                     rst,
+
+  output logic    [DATA_WIDTH-1:0] av_data,
+  output logic  [DATA_WIDTH/8-1:0] av_empty,
+  output logic                     av_valid,
+  output logic                     av_startofpacket,
+  output logic                     av_endofpacket,
+  output logic                     av_channel,
+  output logic                     av_error,
+  input  logic                     av_ready
+);
+
+  bit   [DATA_WIDTH-1:0] tdata [];
+  bit [DATA_WIDTH/8-1:0] tkeep [];
+  bit                    tlast [];
+  
+  bit [31:0] iter, iter_next;
+  bit [31:0] cnt, cnt_next;
+  localparam IDLE  = 2'b00;
+  localparam START = 2'b01;
+  localparam FIN   = 2'b10;
+  int size;
+
+  logic [1:0] state_next, state;
+  logic first_next, first;
+
+  pcap_parser inst_pcap_parser();
+
+  initial begin
+    inst_pcap_parser.read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast, size);
+  end
+    
+  always_comb begin
+    state_next = state;
+	iter_next = iter;
+	cnt_next = cnt;
+	first_next = first;
+    av_data = 'h0;
+	av_empty = 'h0;
+	av_startofpacket = 1'b0;
+	av_endofpacket = 1'b0;
+	av_endofpacket = 1'b0;
+	av_valid = 1'b0;
+	av_channel = 'h0;
+	av_error = 'h0;
+
+    case (state)
+    IDLE: begin
+	  cnt_next = cnt + 1;
+      if (cnt == 30) begin
+        state_next = START;
+      end
+	end
+    START: begin
+      if (av_ready) begin
+        iter_next = iter + 1;
+        av_data = tdata[iter];
+		if (first) begin
+			av_startofpacket = 1'b1;
+            first_next = 1'b1;
+        end
+        av_valid = 1'b1;
+      end
+      av_endofpacket = tlast[iter];
+      if (iter == size) begin
+        state_next = FIN;
+		av_empty = DATA_WIDTH/8;
+        foreach(tkeep[iter])
+          av_empty -= tkeep[iter];
+	  end
+    end
+    FIN: begin
+      av_data = 'h0;
+      av_valid = 1'b0;
+      av_empty = 'h0;
+      av_startofpacket = 1'b0;
+      av_endofpacket = 1'b0;
+      av_channel = 1'b0;
+      av_error = 1'b0;
+      first_next = 1'b0;
+    end
+    endcase
+  end
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      iter <= 'h0;
+      cnt <= 'h0;
+      state <= IDLE;
+	  first <= 1'b0;
+	end
+	else begin
+      iter <= iter_next;
+      cnt <= cnt_next;
+      state <= state_next;
+	  first <= first_next;
+	end
+  end
+endmodule
+
 module pkt_writer #(
     parameter PCAP_FILE_NAME = "",
     parameter TDATA_WIDTH    = 512,
@@ -423,6 +530,85 @@ module pkt_writer #(
       if (s_axis_tvalid && s_axis_tready)
         counter <= counter + 'h1;
       if (!s_axis_tvalid)
+        wait_counter <= wait_counter + 'h1;
+      else
+        wait_counter <= 'h0;
+    end
+
+  //always_ff @(posedge clk)
+  //  if (s_axis_tvalid && s_axis_tready)
+  //    $display("[S_AXIS] TDATA:0x%x TKEEP:0x%x TLAST:0x%x",  s_axis_tdata, s_axis_tkeep, s_axis_tlast);
+
+  initial begin
+    wait(wait_counter > TIMEOUT);
+    //if (debug)
+    //  for (int i = 0; i < tdata.size(); i++)
+    //    $display("[WR PCAP] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
+    inst_pcap_parser.write_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
+    $display("wrote axi-stream flits %d", tdata.size());
+	$display("SUMMARY: writting to %s", PCAP_FILE_NAME);
+	$finish;
+  end
+
+endmodule
+
+module pkt_writer_avalon_st #(
+    parameter PCAP_FILE_NAME = "",
+    parameter DATA_WIDTH    = 512,
+    parameter PKT_MTU_SIZE   = 8192,
+    parameter TIMEOUT        = 300
+)(
+  input  logic                     clk,
+  input  logic                     rst,
+
+  input  logic    [DATA_WIDTH-1:0] av_data,
+  input  logic  [DATA_WIDTH/8-1:0] av_empty,
+  input  logic                     av_valid,
+  input  logic                     av_startofpacket,
+  input  logic                     av_endofpacket,
+  input  logic                     av_channel,
+  input  logic                     av_error,
+  output logic                     av_ready
+);
+
+  bit    [DATA_WIDTH-1:0] tdata [];
+  bit  [DATA_WIDTH/8-1:0] tkeep [];
+  bit                     tlast [];
+
+  bit [DATA_WIDTH/8*2-1:0] tmp;
+
+  bit [31:0] counter, wait_counter;
+
+  assign s_axis_tready = 1'b1;
+
+  pcap_parser inst_pcap_parser();
+
+  always_comb begin
+    if (av_valid && av_ready) begin
+      tdata = new[tdata.size() + 1](tdata);
+      tkeep = new[tkeep.size() + 1](tkeep);
+      tlast = new[tlast.size() + 1](tlast);
+
+      tdata[counter] = av_data;
+      tlast[counter] = av_endofpacket;
+      if (av_empty == 'h0) 
+        tkeep[counter] = {(DATA_WIDTH/8){1'b1}};
+      else begin
+        tmp = {(DATA_WIDTH/8*2){1'b1}} >> av_empty;
+        tkeep[counter] = tmp[DATA_WIDTH/8*2-1:DATA_WIDTH/8];
+      end
+    end
+  end
+
+  always_ff @(posedge clk)
+    if (rst) begin
+	  counter <= 'h0;
+	  wait_counter <= 'h0;
+    end
+    else begin
+      if (av_valid && av_ready)
+        counter <= counter + 'h1;
+      if (!av_valid)
         wait_counter <= wait_counter + 'h1;
       else
         wait_counter <= 'h0;
