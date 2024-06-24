@@ -73,7 +73,7 @@ task automatic convert_to_axis(
     tkeep = new[tkeep.size() + 1](tkeep);
     tlast = new[tlast.size() + 1](tlast);
     mod = size % (TDATA_WIDTH/8); 
-    if ( mod + j*(TDATA_WIDTH/8) == size) begin
+    if (j == $ceil(size/64.0)-1) begin
       if (mod != 0)
         d = mod;
       else 
@@ -85,7 +85,7 @@ task automatic convert_to_axis(
       tlast[flit_cnt] = 0;
     end
     tkeep_tmp = {{(TDATA_WIDTH/8){1'b0}}, {(TDATA_WIDTH/8){1'b1}}};
-	tdata_pack = 'h0;
+    tdata_pack = 'h0;
     for (int i = 0; i < d; i+=1) begin
       tdata_pack[8*i +: 8] = packet[p];
       tkeep_tmp = tkeep_tmp << 1;
@@ -158,7 +158,7 @@ task read_pcap(
     end
     read_bytes = 0;
     convert_to_axis(packet, debug, caplen_tmp, tdata_f, tkeep_f, tlast_f);
-    
+
     tdata = new[tdata.size() + tdata_f.size()](tdata);
     tkeep = new[tkeep.size() + tkeep_f.size()](tkeep);
     tlast = new[tlast.size() + tlast_f.size()](tlast);
@@ -257,15 +257,11 @@ task automatic write_pcap(
       pkt_pos = 0;
       for (int i = 0; i < PKT_MTU_BYTE; i++)
         packet[i] = 8'h0;
-	end
+    end
     flit_cnt++;
   end
 
-  $display("DEBUG: AOM FINI");
-
   $fclose(fd);
-
-  $display("DEBUG: AOM FINI 2");
 
 endtask
 
@@ -291,9 +287,9 @@ end
 endmodule
 
 module pkt_replay #(
-	parameter PCAP_FILE_NAME = "",
-	parameter TDATA_WIDTH    = 512,
-	parameter PKT_MTU_SIZE   = 8192
+  parameter PCAP_FILE_NAME = "",
+  parameter TDATA_WIDTH    = 512,
+  parameter PKT_MTU_SIZE   = 8192
 )(
   input  logic                     clk,
   input  logic                     rst,
@@ -308,7 +304,7 @@ module pkt_replay #(
   bit   [TDATA_WIDTH-1:0] tdata [];
   bit [TDATA_WIDTH/8-1:0] tkeep [];
   bit                     tlast [];
-  
+
   bit [31:0] iter, iter_next;
   bit [31:0] cnt, cnt_next;
   localparam IDLE  = 2'b00;
@@ -323,34 +319,34 @@ module pkt_replay #(
   initial begin
     inst_pcap_parser.read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast, size);
   end
-    
+
   always_comb begin
     state_next = state;
-	iter_next = iter;
-	cnt_next = cnt;
-	m_axis_tvalid = 1'b0;
-	m_axis_tdata = 'h0;
-	m_axis_tkeep = 'h0;
-	m_axis_tlast = 'h0;
+    iter_next = iter;
+    cnt_next = cnt;
+    m_axis_tvalid = 1'b0;
+    m_axis_tdata = 'h0;
+    m_axis_tkeep = 'h0;
+    m_axis_tlast = 'h0;
 
     case (state)
     IDLE: begin
-	  cnt_next = cnt + 1;
+      cnt_next = cnt + 1;
       if (cnt == 30) begin
         state_next = START;
       end
-	end
+    end
     START: begin
+      m_axis_tvalid = 1'b1;
+      m_axis_tdata = tdata[iter];
+      m_axis_tkeep = tkeep[iter];
+      m_axis_tlast = tlast[iter];
       if (m_axis_tready) begin
-	    iter_next = iter + 1;
-        m_axis_tvalid = 1'b1;
-        m_axis_tdata = tdata[iter];
-        m_axis_tkeep = tkeep[iter];
-        m_axis_tlast = tlast[iter];
+        iter_next = iter + 1;
       end
-	  if (iter == size) begin
-	    state_next = FIN;
-	  end
+      if (iter == size - 1) begin
+        state_next = FIN;
+      end
     end
     FIN: begin
       m_axis_tvalid = 1'b0;
@@ -366,21 +362,21 @@ module pkt_replay #(
       iter <= 'h0;
       cnt <= 'h0;
       state <= IDLE;
-	end
-	else begin
-      iter <= iter_next;
+    end
+    else begin
       cnt <= cnt_next;
+      iter <= iter_next;
       state <= state_next;
-	end
+    end
   end
 
 endmodule
 
 
 module pkt_replay_avalon_st #(
-	parameter PCAP_FILE_NAME = "",
-	parameter DATA_WIDTH    = 512,
-	parameter PKT_MTU_SIZE   = 8192
+  parameter PCAP_FILE_NAME = "",
+  parameter DATA_WIDTH    = 512,
+  parameter PKT_MTU_SIZE   = 8192
 )(
   input  logic                     clk,
   input  logic                     rst,
@@ -398,7 +394,7 @@ module pkt_replay_avalon_st #(
   bit   [DATA_WIDTH-1:0] tdata [];
   bit [DATA_WIDTH/8-1:0] tkeep [];
   bit                    tlast [];
-  
+
   bit [31:0] iter, iter_next;
   bit [31:0] cnt, cnt_next;
   localparam IDLE  = 2'b00;
@@ -414,45 +410,45 @@ module pkt_replay_avalon_st #(
   initial begin
     inst_pcap_parser.read_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast, size);
   end
-    
+
   always_comb begin
     state_next = state;
-	iter_next = iter;
-	cnt_next = cnt;
-	first_next = first;
+    iter_next = iter;
+    cnt_next = cnt;
+    first_next = first;
     av_data = 'h0;
-	av_empty = 'h0;
-	av_startofpacket = 1'b0;
-	av_endofpacket = 1'b0;
-	av_endofpacket = 1'b0;
-	av_valid = 1'b0;
-	av_channel = 'h0;
-	av_error = 'h0;
+    av_empty = 'h0;
+    av_startofpacket = 1'b0;
+    av_endofpacket = 1'b0;
+    av_endofpacket = 1'b0;
+    av_valid = 1'b0;
+    av_channel = 'h0;
+    av_error = 'h0;
 
     case (state)
     IDLE: begin
-	  cnt_next = cnt + 1;
+      cnt_next = cnt + 1;
       if (cnt == 30) begin
         state_next = START;
       end
-	end
+    end
     START: begin
       if (av_ready) begin
         iter_next = iter + 1;
         av_data = tdata[iter];
-		if (first) begin
-			av_startofpacket = 1'b1;
-            first_next = 1'b1;
+        if (first) begin
+          av_startofpacket = 1'b1;
+          first_next = 1'b1;
         end
         av_valid = 1'b1;
       end
       av_endofpacket = tlast[iter];
       if (iter == size) begin
         state_next = FIN;
-		av_empty = DATA_WIDTH/8;
+        av_empty = DATA_WIDTH/8;
         foreach(tkeep[iter])
           av_empty -= tkeep[iter];
-	  end
+      end
     end
     FIN: begin
       av_data = 'h0;
@@ -472,14 +468,14 @@ module pkt_replay_avalon_st #(
       iter <= 'h0;
       cnt <= 'h0;
       state <= IDLE;
-	  first <= 1'b0;
-	end
-	else begin
+      first <= 1'b0;
+    end
+    else begin
       iter <= iter_next;
       cnt <= cnt_next;
       state <= state_next;
-	  first <= first_next;
-	end
+      first <= first_next;
+    end
   end
 endmodule
 
@@ -523,8 +519,8 @@ module pkt_writer #(
 
   always_ff @(posedge clk)
     if (rst) begin
-	  counter <= 'h0;
-	  wait_counter <= 'h0;
+      counter <= 'h0;
+      wait_counter <= 'h0;
     end
     else begin
       if (s_axis_tvalid && s_axis_tready)
@@ -546,8 +542,8 @@ module pkt_writer #(
     //    $display("[WR PCAP] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
     inst_pcap_parser.write_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
     $display("wrote axi-stream flits %d", tdata.size());
-	$display("SUMMARY: writting to %s", PCAP_FILE_NAME);
-	$finish;
+    $display("SUMMARY: writting to %s", PCAP_FILE_NAME);
+    $finish;
   end
 
 endmodule
@@ -579,7 +575,7 @@ module pkt_writer_avalon_st #(
 
   bit [31:0] counter, wait_counter;
 
-  assign s_axis_tready = 1'b1;
+  assign av_ready = 1'b1;
 
   pcap_parser inst_pcap_parser();
 
@@ -602,8 +598,8 @@ module pkt_writer_avalon_st #(
 
   always_ff @(posedge clk)
     if (rst) begin
-	  counter <= 'h0;
-	  wait_counter <= 'h0;
+      counter <= 'h0;
+      wait_counter <= 'h0;
     end
     else begin
       if (av_valid && av_ready)
@@ -625,8 +621,8 @@ module pkt_writer_avalon_st #(
     //    $display("[WR PCAP] [%4d] TDATA:0x%x TKEEP:0x%x TLAST:0x%x", i, tdata[i], tkeep[i], tlast[i]);
     inst_pcap_parser.write_pcap(PCAP_FILE_NAME, 1'b0, tdata, tkeep, tlast);
     $display("wrote axi-stream flits %d", tdata.size());
-	$display("SUMMARY: writting to %s", PCAP_FILE_NAME);
-	$finish;
+    $display("SUMMARY: writting to %s", PCAP_FILE_NAME);
+    $finish;
   end
 
 endmodule

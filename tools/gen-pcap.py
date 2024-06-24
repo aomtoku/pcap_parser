@@ -11,7 +11,7 @@ def generate_load(length):
     return load
 
 def main(argv):
-    outputfile = 'test.pcap'
+    outputfile = 'in.pcap'
     pkts_num = 1
     pktlen = 60
     found_option = False
@@ -24,11 +24,23 @@ def main(argv):
 
     pkts = []
 
+    # In packets
     for i in range(pkts_num):
         pkt = Ether(src=sMAC, dst=dMAC)/IP(src=sIP, dst=dIP)/UDP(sport=12345, dport=12346)/generate_load(46)
         pkts.append(pkt)
 
     scapy.utils.wrpcap(outputfile, pkts)
+
+    # DUT Logic
+    for p in pkts:
+        sip = p.getlayer(IP).src
+        dip = p.getlayer(IP).dst
+        
+        p.getlayer(IP).src = dip
+        p.getlayer(IP).dst = sip
+
+    scapy.utils.wrpcap("exp_out.pcap", pkts)
+
 
 if __name__ == "__main__":
    main(sys.argv[1:])

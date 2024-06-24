@@ -73,7 +73,7 @@ module tb();
   );
 
   pkt_replay #(
-    .PCAP_FILE_NAME ("f.pcap")
+    .PCAP_FILE_NAME ("in.pcap")
   ) inst_pkt_replay (
     .clk            (core_clk),
     .rst            (core_rst),
